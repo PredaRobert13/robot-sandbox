@@ -46,6 +46,15 @@ speedpot = None
 speedlabel = None
 plusminus = []
 signalsVBox = None
+MATRIX_COLS = 1   # default: o coloana (comportament original)
+CELL_W = 52
+CELL_H = 20
+CELL_PAD = 2
+
+def set_matrix_cols(n=1):
+    global MATRIX_COLS
+    MATRIX_COLS = max(1, n)
+    RobotSim.signals_dirty = True
 
 jogEnabled = False
 jogAxis = 0
@@ -176,7 +185,7 @@ def initGUI():
     #~ fpsindic.label.style["font-size"] = 14
     #~ leftPanel[0].add(fpsindic)
 
-    signalsVBox = gui.VBox(x = 0, y = 0, width = 90)
+    signalsVBox = gui.Container(x = 0, y = 0, width = MATRIX_COLS * (CELL_W + CELL_PAD))
     signalsVBox.value = "signals"
     leftPanel[0].add(signalsVBox)
 
@@ -378,19 +387,22 @@ refreshTime = 0
 def refreshSignals():
     global signalsVBox
     if RobotSim.signals_dirty:
-        #~ print "refreshing"
         try:
-            
-            n = len(RobotSim.signals)
+            addresses = sorted(RobotSim.signals.keys())
+            n = len(addresses)
+            NC = MATRIX_COLS
+            NL = max(1, (n + NC - 1) // NC)  # nr. linii necesare
+
+            # Adauga butoane noi daca e nevoie
             m = len(signalsVBox.widgets)
-            
             if n > m:
                 for i in range(n - m):
-                    w = gui.Button("spanac", width=10)
-                    w.label.style["width"] = 10
-                    w.label.style["font-size"] = 14
-                    w.label.style["height"] = 18
-                    w.style["height"] = 18
+                    w = gui.Button("", width=CELL_W, height=CELL_H)
+                    w.label.style["font-size"] = 11
+                    w.label.style["color"] = (255, 255, 255)
+                    w.style["height"] = CELL_H
+                    w.style["width"] = CELL_W
+                    w.style["padding"] = (2, 2)
                     signalsVBox.add(w)
                     enableStealEvents([w])
             elif n < m:
@@ -398,41 +410,44 @@ def refreshSignals():
                 leftPanel[0].top_surface = leftPanel[1].surf
                 for i in range(m - n):
                     signalsVBox.remove(signalsVBox.widgets[-1])
-            
-            i = 0
-            addresses = RobotSim.signals.keys()
-            addresses.sort()
-            for addr in addresses:
+
+            # Pozitioneaza fiecare buton in grid si actualizeaza continutul
+            for idx, addr in enumerate(addresses):
+                row = idx // NC
+                col = idx % NC
                 val = RobotSim.signals[addr]
-                w = signalsVBox.widgets[i]
+
+                w = signalsVBox.widgets[idx]
+
+                # Pozitie absoluta in grid
+                w.x = col * (CELL_W + CELL_PAD)
+                w.y = row * (CELL_H + CELL_PAD)
+
                 try:
                     (oldaddr, oldval) = w.sig
-                    refresh = (oldaddr, oldval) != (addr, val)
+                    needs_refresh = (oldaddr != addr) or (oldval != val)
                 except:
-                    refresh = True
-                
-                if refresh:
-                    #~ print "refreshing ", addr, val
+                    needs_refresh = True
+
+                if needs_refresh:
                     signalsVBox.dirty = True
+
                     if addr < 1000:
-                        type = "out"
+                        sig_type = "out"
                     elif addr < 2000:
-                        type = "in"
+                        sig_type = "in"
                     else:
-                        type = "soft"
-                        
-                    if val:
-                        sval = "on"
-                    else:
-                        sval = "off"
-                    
-                    w.value = "%s: %d" % (type, addr)
-                    w.label.style["color"] = (255,255,255)
-                    w.label.style["font-size"] = 14
-                    #w.style["width"] = 70
-                    w.style["height"] = 18
-                    w.style["padding"] = (5,10)
-                    im = "data/%s-%s.png slice" % (type, sval)
+                        sig_type = "soft"
+
+                    sval = "on" if val else "off"
+
+                    w.value = "%d" % addr
+                    w.label.style["color"] = (255, 255, 255)
+                    w.label.style["font-size"] = 11
+                    w.style["height"] = CELL_H
+                    w.style["width"] = CELL_W
+                    w.style["padding"] = (2, 2)
+                    im = "data/%s-%s.png slice" % (sig_type, sval)
                     w.stylesets["default"]["bgimage"] = im
                     w.stylesets["hover"]["bgimage"] = im
                     w.stylesets["focused"]["bgimage"] = im
@@ -440,38 +455,24 @@ def refreshSignals():
                     w.sig = (addr, val)
                     w.dirty = True
                     w.connect(CLICK, onSignalToggle, addr)
-                    #~ print "refresh done"
-                    
-                i += 1
-                
+
             leftPanel[0].dirty = 1
-            #leftPanel[0].run([])
-
             RobotSim.signals_dirty = False
-            
-            #~ print "resizetest"
-            (w, h, x, y) = leftPanel[1]._whxy            
-            signalsh = 30 * n
-            if signalsh > h:
-                newh = lamina.pow2(signalsh)
-                #~ print "growing to ", newh
-                leftPanel[1] = lamina.LaminaPartialScreenSurface(100, newh, 10, -10)
-                leftPanel[0].top_surface = leftPanel[1].surf
-                leftPanel[0].dirty = True
-            elif signalsh < h/2:
-                newh = lamina.pow2(signalsh)
-                #~ print "shrinking to ", newh
-                leftPanel[1] = lamina.LaminaPartialScreenSurface(100, newh, 10, -10)
-                leftPanel[0].top_surface = leftPanel[1].surf
-                leftPanel[0].dirty = True
-                
-            #~ print "resizetest done"
 
-            
+            # Redimensioneaza panoul daca e nevoie
+            (pw, ph, px, py) = leftPanel[1]._whxy
+            panel_w = NC * (CELL_W + CELL_PAD) + 20
+            signalsh = NL * (CELL_H + CELL_PAD) + 10
+            if signalsh > ph or signalsh < ph // 2 or panel_w > pw:
+                newh = lamina.pow2(signalsh)
+                neww = lamina.pow2(panel_w)
+                leftPanel[1] = lamina.LaminaPartialScreenSurface(neww, newh, 10, -10)
+                leftPanel[0].top_surface = leftPanel[1].surf
+                leftPanel[0].dirty = True
+
         except IndexError:
             print "Race condition detected in GUI signals module"
         except RuntimeError:
-            #~ print "runtime error"
             pass
         #~ print "done"
             
